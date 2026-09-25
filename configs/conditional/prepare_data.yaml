@@ -1,0 +1,22 @@
+input_csv: data/raw/protacs_poi_conditional.csv
+output_dir: data/processed/conditional_top20
+
+smiles_column: smiles_std
+
+keep_columns:
+  - target_uniprot
+  - poi_norm
+  - e3_norm
+
+split:
+  method: conditional_top_poi
+  seed: 42
+
+  # Applied independently within each of the top-20 evaluated POIs.
+  # All other POIs are assigned fully to train.
+  train_frac: 0.80
+  val_frac: 0.10
+  test_frac: 0.10
+
+  poi_column: poi_norm
+  top_n_eval_pois: 20

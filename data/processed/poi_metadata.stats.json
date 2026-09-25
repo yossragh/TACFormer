@@ -1,0 +1,19 @@
+{
+  "input_jsonls": [
+    "data/processed/conditional_top20/train.jsonl",
+    "data/processed/conditional_top20/val.jsonl",
+    "data/processed/conditional_top20/test.jsonl",
+    "data/processed/conditional_top20/unseen.jsonl"
+  ],
+  "output_csv": "data/processed/poi_metadata.csv",
+  "stats_json": "data/processed/poi_metadata.stats.json",
+  "num_unique_uniprots": 408,
+  "num_unique_pois": 408,
+  "num_ok": 408,
+  "num_not_found": 0,
+  "num_missing_sequence": 0,
+  "missing_sequence_uniprots": [],
+  "min_sequence_length": 46,
+  "median_sequence_length": 595.5,
+  "max_sequence_length": 3142
+}

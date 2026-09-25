@@ -1,0 +1,16 @@
+torch==2.12.0a0+0291f960b6.nv26.4.48445190
+numpy==2.1.0
+pandas==3.0.2
+PyYAML==6.0.1
+tqdm==4.67.3
+rdkit==2026.3.1
+tensorboard==2.20.0
+matplotlib==3.10.8
+seaborn==0.13.2
+optuna==4.8.0
+scikit-learn==1.8.0
+scipy==1.17.1
+requests==2.33.1
+transformers==5.8.0
+accelerate==1.13.0
+flash-attn==2.7.4.post1+git5231d95fe1.45164347

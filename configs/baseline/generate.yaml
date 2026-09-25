@@ -1,0 +1,22 @@
+tokenizer:
+  path: artifacts/tokenizer_pretrain/tokenizer.json
+
+model:
+  path: /nobackup/proj/disk/naiss2024-5-630/personal/yossra/TACFormer/baseline/seed_101/???
+
+generation:
+  output_path: /nobackup/proj/disk/naiss2024-5-630/personal/yossra/TACFormer/baseline/seed_101/evaluation/raw_samples.jsonl
+
+  seed: 42
+  device: cuda
+
+  num_samples: 200000
+  batch_size: 32
+
+  max_new_tokens:
+
+  temperature: 1.0
+
+  top_k:
+
+  top_p: 0.9

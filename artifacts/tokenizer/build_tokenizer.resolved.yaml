@@ -1,0 +1,6 @@
+train_jsonl: data/processed/train.jsonl
+val_jsonl: data/processed/val.jsonl
+test_jsonl: data/processed/test.jsonl
+output_dir: artifacts/tokenizer
+smiles_field: smiles
+min_freq: 1

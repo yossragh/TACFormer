@@ -1,0 +1,105 @@
+tokenizer:
+  path: artifacts/tokenizer_pretrain/tokenizer.json
+
+
+data:
+  train_jsonl: data/processed/conditional_top20/train.jsonl
+  val_jsonl: data/processed/conditional_top20/val.jsonl
+
+  smiles_field: smiles
+  max_seq_len: 320
+
+  randomize_train_smiles: true
+  randomize_train_probability: 1.0
+  randomize_train_max_attempts: 10
+
+
+conditioning:
+  enabled: true
+  poi_embeddings_path: data/processed/poi_embeddings.pt
+  target_uniprot_field: target_uniprot
+  poi_embedding_dim: 1280
+
+
+model:
+  init_checkpoint: /nobackup/proj/disk/naiss2024-5-630/personal/yossra/TACFormer/pretrain/seed_11/checkpoint-58950
+
+  max_seq_len: 320
+  n_layers: 8
+  d_model: 512
+  n_heads: 8
+  mlp_ratio: 4
+  dropout: 0.05
+  bias: true
+
+
+train:
+  seed: 100
+  output_dir: /nobackup/proj/disk/naiss2024-5-630/personal/yossra/TACFormer/conditional/seed_100
+  run_name: conditional_seed_100
+
+  epochs: 40
+
+  per_device_train_batch_size: 32
+  per_device_eval_batch_size: 32
+  gradient_accumulation_steps: 1
+
+  learning_rate: 1.0e-4
+
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+  warmup_ratio: 0.05
+  lr_scheduler_type: cosine
+
+  logging_steps: 20
+
+  save_strategy: epoch
+  eval_strategy: epoch
+  save_total_limit: null
+
+  fp16: false
+  bf16: true
+
+  report_to: wandb
+
+  generation_monitor:
+    enabled: true
+    every_n_epochs: 2
+
+    samples_per_poi: 500
+    batch_size: 32
+
+    max_new_tokens: null
+
+    temperature: 1.0
+    top_k: null
+    top_p: 0.9
+
+    reference_jsonls:
+      - data/processed/conditional_top20/train.jsonl
+
+    reference_smiles_field: smiles
+
+    fp_radius: 2
+    fp_n_bits: 2048
+    max_diversity_samples: 1000
+
+    condition_nll:
+      enabled: true
+      records_per_poi: 10
+      batch_size: 64
+      seed: 12345
+
+    generated_poi_knn:
+      enabled: true
+      k: 5
+      max_valid_per_poi: 25
+
+    log_molecule_images_to_wandb: true
+    num_valid_molecules_to_visualize: 10
+
+    mols_per_row: 5
+    sub_img_size: [300, 300]
+
+    save_monitor_metrics_locally: true

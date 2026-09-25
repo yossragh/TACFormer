@@ -1,0 +1,19 @@
+{
+  "input_csv": "data/raw/protacs_unconditional.csv",
+  "output_dir": "data/processed/unconditional",
+  "input_records": 27489,
+  "train_records": 21991,
+  "val_records": 2748,
+  "test_records": 2750,
+  "split_method": "random",
+  "seed": 42,
+  "train_frac": 0.8,
+  "val_frac": 0.1,
+  "test_frac": 0.1,
+  "kept_columns": [
+    "smiles",
+    "target_uniprot",
+    "poi_norm",
+    "e3_norm"
+  ]
+}

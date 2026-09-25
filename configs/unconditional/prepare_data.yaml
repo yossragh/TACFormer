@@ -1,0 +1,20 @@
+input_csv: data/raw/protacs_unconditional.csv
+output_dir: data/processed/unconditional
+smiles_column: smiles_std
+
+keep_columns:
+  - target_uniprot
+  - poi_norm
+  - e3_norm
+
+validate_smiles: false
+canonicalize: false
+deduplicate: false
+max_smiles_length: null
+
+split:
+  method: random
+  seed: 42
+  train_frac: 0.80
+  val_frac: 0.10
+  test_frac: 0.10

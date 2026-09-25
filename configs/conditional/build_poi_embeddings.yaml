@@ -1,0 +1,38 @@
+metadata_csv: data/processed/poi_metadata.csv
+output_pt: data/processed/poi_embeddings.pt
+stats_json: data/processed/poi_embeddings.stats.json
+
+uniprot_field: target_uniprot
+poi_field: poi_norm
+sequence_field: sequence
+
+# Final protein-level representation:
+# mean over exactly one stitched ESM-2 residue representation
+# per amino acid.
+pooling: mean
+
+model:
+  name_or_path: facebook/esm2_t33_650M_UR50D
+
+  # Automatically use CUDA when available, otherwise CPU.
+  device: auto
+
+  # ESM-2 inference and saved embeddings use FP32.
+  dtype: float32
+
+  # Maximum number of amino-acid residues in one ESM-2 window.
+  max_amino_acids_per_chunk: 1022
+
+  # Proteins longer than 1022 residues are processed
+  # using overlapping windows.
+  chunk_long_sequences: true
+
+  # Adjacent windows share 256 residues.
+  # stride = 1022 - 256 = 766
+  chunk_overlap: 256
+
+  # Number of windows from one protein processed together.
+  batch_size: 2
+
+  # false allows Hugging Face to download/cache ESM-2 when needed.
+  local_files_only: false

@@ -1,0 +1,43 @@
+{
+  "num_pois": 20,
+  "targets": {
+    "P10275": "AR",
+    "P03372": "ESR1",
+    "P11802": "CDK4",
+    "P01116": "KRAS",
+    "Q15910": "EZH2",
+    "Q06187": "BTK",
+    "O60885": "BRD4",
+    "P15056": "BRAF",
+    "P51532": "SMARCA4",
+    "Q92918": "MAP4K1",
+    "Q9NWZ3": "IRAK4",
+    "P00533": "EGFR",
+    "Q07817": "BCL2L1",
+    "P51531": "SMARCA2",
+    "Q9HCE5": "METTL14",
+    "P18031": "PTPN1",
+    "P10415": "BCL2",
+    "Q07889": "SOS1",
+    "P41182": "BCL6",
+    "P10636": "MAPT"
+  },
+  "definitions": {
+    "split_coverage": "successfully parsed and canonicalized POI-warhead splits / unique valid generated PROTACs, computed per POI",
+    "warhead_uniqueness": "unique generated POI warheads / successfully split unique generated PROTACs, computed per POI",
+    "warhead_diversity": "mean pairwise Morgan-Tanimoto distance among unique generated warheads from the same POI",
+    "warhead_novelty": "unique generated warheads absent from TRAIN warheads for the same POI / unique generated warheads for that POI"
+  },
+  "fingerprint": {
+    "type": "Morgan",
+    "radius": 2,
+    "n_bits": 2048
+  },
+  "keep_attachment_atoms": false,
+  "macro": {
+    "split_coverage": 0.9528528375810728,
+    "warhead_uniqueness": 0.2747162854580877,
+    "warhead_diversity": 0.7747928347523457,
+    "warhead_novelty": 0.8919637814699067
+  }
+}

@@ -1,0 +1,7 @@
+train_jsonl: /mimer/NOBACKUP/groups/naiss2023-6-290/yossra/dapt_merged/train_dapt.jsonl
+val_jsonl: /mimer/NOBACKUP/groups/naiss2023-6-290/yossra/dapt_merged/val_dapt.jsonl
+test_jsonl: data/processed/train.jsonl
+
+output_dir: artifacts/tokenizer_pretrain
+smiles_field: smiles
+min_freq: 1

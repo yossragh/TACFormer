@@ -1,0 +1,19 @@
+input_jsonls:
+  - data/processed/conditional_top20/train.jsonl
+  - data/processed/conditional_top20/val.jsonl
+  - data/processed/conditional_top20/test.jsonl
+  - data/processed/conditional_top20/unseen.jsonl
+
+output_csv: data/processed/poi_metadata.csv
+stats_json: data/processed/poi_metadata.stats.json
+
+target_uniprot_field: target_uniprot
+poi_field: poi_norm
+
+fail_on_missing_sequence: true
+
+uniprot:
+  base_url: https://rest.uniprot.org
+  timeout_seconds: 30
+  max_retries: 3
+  sleep_seconds: 0.2
