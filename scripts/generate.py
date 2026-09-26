@@ -40,8 +40,15 @@ def _set_seed(seed: int) -> None:
 
 
 def resolve_device(device_name: str) -> torch.device:
-    if device_name == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("Config requested CUDA, but no GPU is available.")
+    if device_name == "auto":
+        return torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+
+    if device_name.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            "Config requested CUDA, but no GPU is available."
+        )
 
     return torch.device(device_name)
 
@@ -50,107 +57,141 @@ def load_model(
     model_path: str | Path,
     device: torch.device,
 ) -> GPTForCausalLM:
-    """
-    Load a Hugging Face-style saved model.
-
-    Expected directory structure:
-        final_model/
-            config.json
-            model.safetensors
-
-    or a Trainer checkpoint directory:
-        checkpoint-XXXX/
-            config.json
-            model.safetensors
-    """
     model_path = Path(model_path)
 
-    if not model_path.exists():
-        raise FileNotFoundError(f"Model path does not exist: {model_path}")
-
     if not model_path.is_dir():
-        raise ValueError(
-            f"Expected a Hugging Face model directory, but got a file: {model_path}"
-        )
-
-    config_path = model_path / "config.json"
-
-    if not config_path.exists():
         raise FileNotFoundError(
-            f"Could not find config.json in {model_path}. "
-            "Use a model directory saved by trainer.save_model(...), "
-            "or a valid Trainer checkpoint directory."
+            f"Model directory does not exist: {model_path}"
         )
 
-    model = GPTForCausalLM.from_pretrained(str(model_path))
+    model = GPTForCausalLM.from_pretrained(
+        str(model_path)
+    )
     model.to(device)
     model.eval()
 
     return model
 
 
+def _model_uses_poi_conditioning(
+    model: GPTForCausalLM,
+) -> bool:
+    return bool(
+        getattr(
+            model.config,
+            "poi_conditioning",
+            False,
+        )
+    )
+
+
 def _resolve_max_new_tokens(
     max_new_tokens: Any,
     model: GPTForCausalLM,
 ) -> int:
-    """
-    Resolve and validate max_new_tokens.
-
-    Generation starts from one BOS token, so the maximum number of new tokens
-    is model.config.max_seq_len - 1.
-    """
     if max_new_tokens is None:
-        max_new_tokens = model.config.max_seq_len - 1
+        max_new_tokens = (
+            int(model.config.max_seq_len) - 1
+        )
 
     max_new_tokens = int(max_new_tokens)
-    max_allowed = int(model.config.max_seq_len) - 1
+    max_allowed = (
+        int(model.config.max_seq_len) - 1
+    )
 
     if max_new_tokens <= 0:
-        raise ValueError("max_new_tokens must be > 0")
+        raise ValueError(
+            "max_new_tokens must be > 0."
+        )
 
     if max_new_tokens > max_allowed:
         raise ValueError(
-            f"max_new_tokens={max_new_tokens} exceeds model context limit "
-            f"{max_allowed} when starting from BOS."
+            f"max_new_tokens={max_new_tokens} exceeds "
+            f"the available generation length {max_allowed} "
+            "when starting from one BOS token."
         )
 
     return max_new_tokens
 
 
-def _validate_generation_args(
+def _validate_generation_plan(
     num_samples: int,
     batch_size: int,
-    max_new_tokens: int,
-    temperature: float,
-    top_k: int | None,
-    top_p: float | None,
+    poi_embeddings: torch.Tensor | None,
+    sample_metadata: list[dict[str, Any]] | None,
 ) -> None:
+    """
+    Validate only script-level alignment.
+
+    Model-specific checks such as POI embedding dimension,
+    finite values, conditioning mode, temperature, top-k,
+    and top-p are handled by GPTForCausalLM.generate/forward.
+    """
     if num_samples <= 0:
-        raise ValueError("num_samples must be > 0")
+        raise ValueError(
+            "num_samples must be > 0."
+        )
 
     if batch_size <= 0:
-        raise ValueError("batch_size must be > 0")
+        raise ValueError(
+            "batch_size must be > 0."
+        )
 
-    if max_new_tokens <= 0:
-        raise ValueError("max_new_tokens must be > 0")
+    if poi_embeddings is not None:
+        if not isinstance(
+            poi_embeddings,
+            torch.Tensor,
+        ):
+            raise TypeError(
+                "poi_embeddings must be a torch.Tensor or None."
+            )
 
-    if temperature <= 0:
-        raise ValueError("temperature must be > 0")
+        if poi_embeddings.ndim != 2:
+            raise ValueError(
+                "poi_embeddings must have shape [N, D]. "
+                f"Got {tuple(poi_embeddings.shape)}."
+            )
 
-    if top_k is not None and top_k <= 0:
-        raise ValueError("top_k must be > 0 or None")
+        if int(poi_embeddings.shape[0]) != num_samples:
+            raise ValueError(
+                "poi_embeddings must contain one row per "
+                f"requested sample: rows={poi_embeddings.shape[0]}, "
+                f"num_samples={num_samples}."
+            )
 
-    if top_p is not None and not (0.0 < top_p <= 1.0):
-        raise ValueError("top_p must be in (0, 1] or None")
+    if sample_metadata is not None:
+        if len(sample_metadata) != num_samples:
+            raise ValueError(
+                "sample_metadata must contain one dictionary "
+                f"per sample: len={len(sample_metadata)}, "
+                f"num_samples={num_samples}."
+            )
+
+        for index, metadata in enumerate(
+            sample_metadata
+        ):
+            if not isinstance(metadata, dict):
+                raise TypeError(
+                    "Every sample_metadata entry must be a dictionary. "
+                    f"Entry {index} has type {type(metadata)}."
+                )
+
+            reserved = {
+                "sample_id",
+                "raw_smiles",
+            }.intersection(metadata)
+
+            if reserved:
+                raise ValueError(
+                    "sample_metadata may not overwrite reserved "
+                    f"generation fields: {sorted(reserved)}"
+                )
 
 
-def _get_bad_token_ids(tokenizer: SmilesTokenizer) -> list[int]:
-    """
-    Tokens blocked during generation.
-
-    EOS is intentionally excluded because the model must be able to emit it
-    to stop generation.
-    """
+def _get_bad_token_ids(
+    tokenizer: SmilesTokenizer,
+) -> list[int]:
+    # EOS is intentionally allowed so generation can stop.
     return [
         tokenizer.pad_id,
         tokenizer.bos_id,
@@ -168,87 +209,121 @@ def _run_generation_loop(
     top_k: int | None,
     top_p: float | None,
     device: torch.device,
-    on_batch: Callable[[list[dict[str, Any]]], None],
+    on_batch: Callable[
+        [list[dict[str, Any]]],
+        None,
+    ],
     show_progress: bool = False,
+    poi_embeddings: torch.Tensor | None = None,
+    sample_metadata: list[dict[str, Any]] | None = None,
 ) -> int:
-    """
-    Shared raw-generation loop.
 
-    This function only generates raw decoded SMILES records.
-
-    It does NOT:
-        - canonicalize SMILES
-        - compute validity
-        - compute uniqueness
-        - compute novelty
-        - compute diversity
-
-    Those steps belong in evaluate.py.
-
-    Note:
-        This function does not change model.train()/model.eval().
-        The caller is responsible for setting the desired model mode.
-    """
-    _validate_generation_args(
+    _validate_generation_plan(
         num_samples=num_samples,
         batch_size=batch_size,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_k=top_k,
-        top_p=top_p,
+        poi_embeddings=poi_embeddings,
+        sample_metadata=sample_metadata,
     )
 
-    bad_token_ids = _get_bad_token_ids(tokenizer)
+    bad_token_ids = _get_bad_token_ids(
+        tokenizer
+    )
 
     generated = 0
 
-    with torch.inference_mode():
-        with tqdm(
-            total=num_samples,
-            desc="Generating",
-            unit="mol",
-            disable=not show_progress,
-        ) as pbar:
-            while generated < num_samples:
-                current_batch_size = min(batch_size, num_samples - generated)
+    with tqdm(
+        total=num_samples,
+        desc="Generating",
+        unit="mol",
+        disable=not show_progress,
+    ) as pbar:
+        while generated < num_samples:
+            current_batch_size = min(
+                batch_size,
+                num_samples - generated,
+            )
 
-                start_ids = torch.full(
-                    (current_batch_size, 1),
-                    tokenizer.bos_id,
-                    dtype=torch.long,
-                    device=device,
+            batch_start = generated
+            batch_end = (
+                batch_start
+                + current_batch_size
+            )
+
+            start_ids = torch.full(
+                (
+                    current_batch_size,
+                    1,
+                ),
+                tokenizer.bos_id,
+                dtype=torch.long,
+                device=device,
+            )
+
+            batch_poi_embeddings = None
+
+            if poi_embeddings is not None:
+                # Move each POI batch to the model device once.
+                batch_poi_embeddings = (
+                    poi_embeddings[
+                        batch_start:batch_end
+                    ].to(device=device)
                 )
 
-                output_ids = model.generate(
-                    input_ids=start_ids,
-                    max_new_tokens=max_new_tokens,
-                    eos_token_id=tokenizer.eos_id,
-                    temperature=temperature,
-                    top_k=top_k,
-                    top_p=top_p,
-                    bad_token_ids=bad_token_ids,
+            output_ids = model.generate(
+                input_ids=start_ids,
+                max_new_tokens=max_new_tokens,
+                eos_token_id=tokenizer.eos_id,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                bad_token_ids=bad_token_ids,
+                poi_embeddings=batch_poi_embeddings,
+            )
+
+            batch_records: list[
+                dict[str, Any]
+            ] = []
+
+            for local_idx, token_ids in enumerate(
+                output_ids.tolist()
+            ):
+                global_idx = (
+                    batch_start + local_idx
                 )
 
-                batch_records: list[dict[str, Any]] = []
+                raw_smiles = tokenizer.decode(
+                    token_ids,
+                    stop_at_eos=True,
+                    skip_special_tokens=True,
+                )
 
-                for local_idx, token_ids in enumerate(output_ids.tolist()):
-                    raw_smiles = tokenizer.decode(
-                        token_ids,
-                        stop_at_eos=True,
-                        skip_special_tokens=True,
+                record: dict[str, Any] = {
+                    "sample_id": global_idx,
+                    "raw_smiles": raw_smiles,
+                }
+
+                if sample_metadata is not None:
+                    record.update(
+                        sample_metadata[
+                            global_idx
+                        ]
                     )
 
-                    batch_records.append(
-                        {
-                            "sample_id": generated + local_idx,
-                            "raw_smiles": raw_smiles,
-                        }
-                    )
+                batch_records.append(
+                    record
+                )
 
-                on_batch(batch_records)
+            on_batch(
+                batch_records
+            )
 
-                generated += current_batch_size
-                pbar.update(current_batch_size)
+            generated += (
+                current_batch_size
+            )
+
+            pbar.update(
+                current_batch_size
+            )
 
     return generated
 
@@ -264,31 +339,43 @@ def generate_to_file(
     top_k: int | None,
     top_p: float | None,
     device: torch.device,
+    poi_embeddings: torch.Tensor | None = None,
+    sample_metadata: list[dict[str, Any]] | None = None,
 ) -> tuple[int, int]:
     """
-    Generate raw SMILES records and write them incrementally to JSONL.
-
-    This is the CLI/offline generation path.
-
-    Returns:
-        n_written:
-            Number of generated records written.
-        resolved_max_new_tokens:
-            The validated max_new_tokens value actually used.
+    Generate raw SMILES and write them incrementally to JSONL.
     """
-    output_path = Path(output_path)
-    ensure_dir(output_path.parent)
-
-    resolved_max_new_tokens = _resolve_max_new_tokens(
-        max_new_tokens=max_new_tokens,
-        model=model,
+    output_path = Path(
+        output_path
     )
 
-    with open(output_path, "w", encoding="utf-8") as out_f:
+    ensure_dir(
+        output_path.parent
+    )
 
-        def write_batch(records: list[dict[str, Any]]) -> None:
+    resolved_max_new_tokens = (
+        _resolve_max_new_tokens(
+            max_new_tokens=max_new_tokens,
+            model=model,
+        )
+    )
+
+    with output_path.open(
+        "w",
+        encoding="utf-8",
+    ) as out_f:
+
+        def write_batch(
+            records: list[dict[str, Any]],
+        ) -> None:
             for record in records:
-                out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                out_f.write(
+                    json.dumps(
+                        record,
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
 
             out_f.flush()
 
@@ -304,9 +391,14 @@ def generate_to_file(
             device=device,
             on_batch=write_batch,
             show_progress=True,
+            poi_embeddings=poi_embeddings,
+            sample_metadata=sample_metadata,
         )
 
-    return n_written, resolved_max_new_tokens
+    return (
+        n_written,
+        resolved_max_new_tokens,
+    )
 
 
 def generate_to_memory(
@@ -319,25 +411,31 @@ def generate_to_memory(
     top_k: int | None,
     top_p: float | None,
     device: torch.device,
+    poi_embeddings: torch.Tensor | None = None,
+    sample_metadata: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Generate raw SMILES records in memory.
+    Generate raw SMILES in memory.
 
-    This is the importable helper for training-time monitoring and W&B logging.
-
-    Note:
-        This function does not change model.train()/model.eval().
-        The caller is responsible for setting the desired model mode.
+    Used by generation_monitor_callback.py.
     """
-    resolved_max_new_tokens = _resolve_max_new_tokens(
-        max_new_tokens=max_new_tokens,
-        model=model,
+    resolved_max_new_tokens = (
+        _resolve_max_new_tokens(
+            max_new_tokens=max_new_tokens,
+            model=model,
+        )
     )
 
-    records: list[dict[str, Any]] = []
+    records: list[
+        dict[str, Any]
+    ] = []
 
-    def collect_batch(batch_records: list[dict[str, Any]]) -> None:
-        records.extend(batch_records)
+    def collect_batch(
+        batch_records: list[dict[str, Any]],
+    ) -> None:
+        records.extend(
+            batch_records
+        )
 
     _run_generation_loop(
         model=model,
@@ -351,9 +449,211 @@ def generate_to_memory(
         device=device,
         on_batch=collect_batch,
         show_progress=False,
+        poi_embeddings=poi_embeddings,
+        sample_metadata=sample_metadata,
     )
 
     return records
+
+
+def _build_balanced_target_plan(
+    target_uniprots: list[str],
+    num_samples: int,
+) -> list[str]:
+    """
+    Assign generations as evenly as possible across requested POIs.
+    """
+    targets: list[str] = []
+    seen: set[str] = set()
+
+    for target in target_uniprots:
+        target = str(
+            target
+        ).strip()
+
+        if not target:
+            raise ValueError(
+                "target_uniprots contains an empty value."
+            )
+
+        if target not in seen:
+            targets.append(
+                target
+            )
+            seen.add(
+                target
+            )
+
+    if not targets:
+        raise ValueError(
+            "At least one target UniProt ID is required."
+        )
+
+    base_count, remainder = divmod(
+        num_samples,
+        len(targets),
+    )
+
+    plan: list[str] = []
+
+    for index, target in enumerate(
+        targets
+    ):
+        count = (
+            base_count
+            + (
+                1
+                if index < remainder
+                else 0
+            )
+        )
+
+        plan.extend(
+            [target] * count
+        )
+
+    return plan
+
+
+def _resolve_cli_conditioning(
+    cfg: dict[str, Any],
+    model: GPTForCausalLM,
+    num_samples: int,
+) -> tuple[
+    torch.Tensor | None,
+    list[dict[str, Any]] | None,
+]:
+    """
+    Build the per-sample POI conditioning for standalone generation.
+
+    The POI embedding artifact is trusted as the canonical output of
+    protein_embeddings.py. Model-level dimension/value checks remain in
+    GPTForCausalLM.
+    """
+    generation_cfg = cfg["generation"]
+
+    single_target = generation_cfg.get(
+        "target_uniprot"
+    )
+    multiple_targets = generation_cfg.get(
+        "target_uniprots"
+    )
+
+    if not _model_uses_poi_conditioning(
+        model
+    ):
+        return None, None
+
+    conditioning_cfg = cfg.get(
+        "conditioning",
+        {},
+    )
+
+    embeddings_path = (
+        conditioning_cfg.get(
+            "poi_embeddings_path"
+        )
+    )
+
+    if not embeddings_path:
+        raise ValueError(
+            "Conditional generation requires "
+            "conditioning.poi_embeddings_path."
+        )
+
+    if (
+        single_target is not None
+        and multiple_targets is not None
+    ):
+        raise ValueError(
+            "Specify only one of "
+            "generation.target_uniprot or "
+            "generation.target_uniprots."
+        )
+
+    if single_target is not None:
+        target_uniprots = [
+            str(single_target)
+        ]
+
+    elif multiple_targets is not None:
+        if not isinstance(
+            multiple_targets,
+            list,
+        ):
+            raise TypeError(
+                "generation.target_uniprots "
+                "must be a YAML list."
+            )
+
+        target_uniprots = [
+            str(target)
+            for target in multiple_targets
+        ]
+
+    else:
+        raise ValueError(
+            "Conditional generation requires "
+            "generation.target_uniprot or "
+            "generation.target_uniprots."
+        )
+
+    payload = torch.load(
+        embeddings_path,
+        map_location="cpu",
+    )
+
+    embeddings_by_uniprot = (
+        payload[
+            "embeddings_by_uniprot"
+        ]
+    )
+
+    target_plan = (
+        _build_balanced_target_plan(
+            target_uniprots=(
+                target_uniprots
+            ),
+            num_samples=num_samples,
+        )
+    )
+
+    missing_targets = sorted(
+        set(target_plan)
+        - set(
+            embeddings_by_uniprot
+        )
+    )
+
+    if missing_targets:
+        raise KeyError(
+            "Requested target UniProt IDs are "
+            "missing from poi_embeddings.pt: "
+            f"{missing_targets}"
+        )
+
+    poi_embeddings = torch.stack(
+        [
+            embeddings_by_uniprot[
+                target
+            ]
+            for target
+            in target_plan
+        ],
+        dim=0,
+    )
+
+    sample_metadata = [
+        {
+            "target_uniprot": target,
+        }
+        for target in target_plan
+    ]
+
+    return (
+        poi_embeddings,
+        sample_metadata,
+    )
 
 
 def _write_generation_info(
@@ -364,26 +664,35 @@ def _write_generation_info(
     output_path: str | Path,
     generation_cfg: dict[str, Any],
 ) -> None:
-    """
-    Save generation metadata.
-
-    This is not an evaluation summary.
-    No validity, uniqueness, novelty, or diversity metrics are written here.
-    """
-    info = {
-        "model_path": str(model_path),
-        "tokenizer_path": str(tokenizer_path),
-        "output_path": str(output_path),
-        "model_config": model.config.to_dict(),
-        "generation": generation_cfg,
-    }
-
-    write_json(info, path)
+    write_json(
+        {
+            "model_path": str(
+                model_path
+            ),
+            "tokenizer_path": str(
+                tokenizer_path
+            ),
+            "output_path": str(
+                output_path
+            ),
+            "model_config": (
+                model.config.to_dict()
+            ),
+            "generation": (
+                generation_cfg
+            ),
+        },
+        path,
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate raw SMILES from a trained unconditional GPT-style PROTAC model."
+        description=(
+            "Generate raw SMILES from an "
+            "unconditional or POI-conditional "
+            "TACFormer model."
+        )
     )
     parser.add_argument(
         "--config",
@@ -393,99 +702,254 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    cfg = load_yaml(args.config)
+    cfg = load_yaml(
+        args.config
+    )
 
-    output_path = Path(cfg["generation"]["output_path"])
-    ensure_dir(output_path.parent)
+    output_path = Path(
+        cfg["generation"][
+            "output_path"
+        ]
+    )
+
+    ensure_dir(
+        output_path.parent
+    )
 
     save_yaml(
         cfg,
-        output_path.parent / "generate.resolved.yaml",
+        output_path.parent
+        / "generate.resolved.yaml",
     )
 
-    _set_seed(int(cfg["generation"]["seed"]))
-
-    device = _resolve_device(
-        cfg["generation"].get("device", "cuda")
+    _set_seed(
+        int(
+            cfg["generation"][
+                "seed"
+            ]
+        )
     )
 
-    tokenizer = SmilesTokenizer.load(cfg["tokenizer"]["path"])
+    device = resolve_device(
+        cfg["generation"].get(
+            "device",
+            "cuda",
+        )
+    )
 
-    model_path = cfg["model"]["path"]
+    tokenizer = (
+        SmilesTokenizer.load(
+            cfg["tokenizer"]["path"]
+        )
+    )
+
+    model_path = (
+        cfg["model"]["path"]
+    )
 
     model = load_model(
         model_path=model_path,
         device=device,
     )
 
-    if tokenizer.vocab_size != model.config.vocab_size:
+    if (
+        tokenizer.vocab_size
+        != model.config.vocab_size
+    ):
         raise ValueError(
-            f"Tokenizer vocab_size ({tokenizer.vocab_size}) does not match "
+            f"Tokenizer vocab_size "
+            f"({tokenizer.vocab_size}) does not match "
             f"model vocab_size ({model.config.vocab_size}). "
-            "Use the tokenizer that was used when training this model."
+            "Use the tokenizer used during training."
         )
 
-    max_new_tokens_cfg = cfg["generation"].get("max_new_tokens")
-    top_k = parse_optional_int(cfg["generation"].get("top_k"))
-    top_p = parse_optional_float(cfg["generation"].get("top_p"))
+    generation_cfg = (
+        cfg["generation"]
+    )
 
-    num_samples = int(cfg["generation"]["num_samples"])
-    batch_size = int(cfg["generation"]["batch_size"])
-    temperature = float(cfg["generation"]["temperature"])
+    max_new_tokens_cfg = (
+        generation_cfg.get(
+            "max_new_tokens"
+        )
+    )
 
-    print(f"[INFO] Model:                 {model_path}")
-    print(f"[INFO] Tokenizer:             {cfg['tokenizer']['path']}")
-    print(f"[INFO] Output:                {output_path}")
-    print(f"[INFO] Device:                {device}")
-    print(f"[INFO] num_samples:           {num_samples}")
-    print(f"[INFO] batch_size:            {batch_size}")
-    print(f"[INFO] max_new_tokens config: {max_new_tokens_cfg}")
-    print(f"[INFO] temperature:           {temperature}")
-    print(f"[INFO] top_k:                 {top_k}")
-    print(f"[INFO] top_p:                 {top_p}")
+    top_k = parse_optional_int(
+        generation_cfg.get(
+            "top_k"
+        )
+    )
 
-    n_written, resolved_max_new_tokens = generate_to_file(
+    top_p = parse_optional_float(
+        generation_cfg.get(
+            "top_p"
+        )
+    )
+
+    num_samples = int(
+        generation_cfg[
+            "num_samples"
+        ]
+    )
+
+    batch_size = int(
+        generation_cfg[
+            "batch_size"
+        ]
+    )
+
+    temperature = float(
+        generation_cfg[
+            "temperature"
+        ]
+    )
+
+    (
+        poi_embeddings,
+        sample_metadata,
+    ) = _resolve_cli_conditioning(
+        cfg=cfg,
+        model=model,
+        num_samples=num_samples,
+    )
+
+    print(
+        f"[INFO] Model: {model_path}"
+    )
+    print(
+        f"[INFO] Tokenizer: "
+        f"{cfg['tokenizer']['path']}"
+    )
+    print(
+        f"[INFO] Output: {output_path}"
+    )
+    print(
+        f"[INFO] Device: {device}"
+    )
+    print(
+        "[INFO] Mode: "
+        + (
+            "POI-conditional"
+            if _model_uses_poi_conditioning(
+                model
+            )
+            else "unconditional"
+        )
+    )
+
+    if sample_metadata is not None:
+        unique_targets = sorted(
+            {
+                row[
+                    "target_uniprot"
+                ]
+                for row
+                in sample_metadata
+            }
+        )
+
+        print(
+            "[INFO] Conditional targets: "
+            f"{len(unique_targets)}"
+        )
+        print(
+            "[INFO] Target UniProt IDs: "
+            f"{unique_targets}"
+        )
+
+    (
+        n_written,
+        resolved_max_new_tokens,
+    ) = generate_to_file(
         model=model,
         tokenizer=tokenizer,
         output_path=output_path,
         num_samples=num_samples,
         batch_size=batch_size,
-        max_new_tokens=max_new_tokens_cfg,
+        max_new_tokens=(
+            max_new_tokens_cfg
+        ),
         temperature=temperature,
         top_k=top_k,
         top_p=top_p,
         device=device,
+        poi_embeddings=(
+            poi_embeddings
+        ),
+        sample_metadata=(
+            sample_metadata
+        ),
     )
 
-    print(f"[INFO] max_new_tokens used:   {resolved_max_new_tokens}")
-
-    generation_cfg = {
-        "seed": int(cfg["generation"]["seed"]),
-        "device": cfg["generation"].get("device", "cuda"),
-        "num_samples": num_samples,
-        "batch_size": batch_size,
-        "max_new_tokens": resolved_max_new_tokens,
-        "temperature": temperature,
-        "top_k": top_k,
-        "top_p": top_p,
+    run_info = {
+        "seed": int(
+            generation_cfg["seed"]
+        ),
+        "device": str(
+            device
+        ),
+        "num_samples": (
+            num_samples
+        ),
+        "batch_size": (
+            batch_size
+        ),
+        "max_new_tokens": (
+            resolved_max_new_tokens
+        ),
+        "temperature": (
+            temperature
+        ),
+        "top_k": (
+            top_k
+        ),
+        "top_p": (
+            top_p
+        ),
+        "poi_conditioning": (
+            _model_uses_poi_conditioning(
+                model
+            )
+        ),
     }
 
-    generation_info_path = output_path.parent / "generation_info.json"
+    if sample_metadata is not None:
+        run_info[
+            "target_uniprots"
+        ] = sorted(
+            {
+                row[
+                    "target_uniprot"
+                ]
+                for row
+                in sample_metadata
+            }
+        )
+
+    generation_info_path = (
+        output_path.parent
+        / "generation_info.json"
+    )
 
     _write_generation_info(
         path=generation_info_path,
         model=model,
         model_path=model_path,
-        tokenizer_path=cfg["tokenizer"]["path"],
+        tokenizer_path=(
+            cfg["tokenizer"][
+                "path"
+            ]
+        ),
         output_path=output_path,
-        generation_cfg=generation_cfg,
+        generation_cfg=run_info,
     )
 
-    print(f"\n[DONE] Wrote {n_written} raw generated SMILES to: {output_path}")
-    print(f"[INFO] Metadata: {generation_info_path}")
     print(
-        "[INFO] Run evaluate.py later for validity, uniqueness, novelty, "
-        "and diversity metrics."
+        f"[DONE] Wrote {n_written} raw generated "
+        f"SMILES to: {output_path}"
+    )
+    print(
+        f"[INFO] Metadata: "
+        f"{generation_info_path}"
     )
 
 

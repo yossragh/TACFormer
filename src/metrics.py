@@ -10,20 +10,7 @@ import pandas as pd
 
 from utils import read_json, read_jsonl
 
-
-# ---------------------------------------------------------------------
-# Generic metric-table helpers
-# ---------------------------------------------------------------------
-
-
 def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert columns to numeric only when all originally non-null values
-    can be converted.
-
-    This avoids partially converting mixed columns such as labels or paths,
-    while still converting numeric columns that contain missing values.
-    """
     df = df.copy()
 
     for col in df.columns:
@@ -40,21 +27,6 @@ def _coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def extract_scalar_numeric_metrics(metrics: dict[str, Any]) -> dict[str, int | float]:
-    """
-    Extract scalar numeric metrics from a metrics dictionary.
-
-    Kept:
-        int
-        float
-        numpy numeric scalars
-
-    Ignored:
-        bool
-        strings
-        lists
-        dictionaries
-        non-finite floats
-    """
     out: dict[str, int | float] = {}
 
     for key, value in metrics.items():

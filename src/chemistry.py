@@ -13,20 +13,10 @@ try:
     _SA_AVAILABLE = True
 except ImportError:
     _SA_AVAILABLE = False
-
-
-# ---------------------------------------------------------------------
-# RDKit logging
-# ---------------------------------------------------------------------
-
+-
 
 def suppress_rdkit_warnings() -> None:
     RDLogger.DisableLog("rdApp.*")
-
-
-# ---------------------------------------------------------------------
-# SMILES parsing and canonicalization
-# ---------------------------------------------------------------------
 
 
 def mol_from_smiles(smiles: str) -> Chem.Mol | None:
@@ -70,10 +60,6 @@ def randomize_smiles_from_mol(
 
     return None
 
-# ---------------------------------------------------------------------
-# Murcko scaffolds
-# ---------------------------------------------------------------------
-
 
 def murcko_scaffold_from_mol(mol: Chem.Mol | None) -> str | None:
     if mol is None:
@@ -96,21 +82,12 @@ def murcko_scaffold_from_mol(mol: Chem.Mol | None) -> str | None:
     return scaffold_smiles if scaffold_smiles else None
 
 
-# ---------------------------------------------------------------------
-# Morgan fingerprints
-# ---------------------------------------------------------------------
-
-
 def get_morgan_fingerprints_from_mols(
     mols: list[Chem.Mol | None],
     radius: int = 2,
     n_bits: int = 2048,
 ) -> list[Any]:
-    """
-    Compute Morgan fingerprints for a list of RDKit Mol objects.
 
-    None values are skipped.
-    """
     generator = rdFingerprintGenerator.GetMorganGenerator(
         radius=radius,
         fpSize=n_bits,
@@ -123,17 +100,8 @@ def get_morgan_fingerprints_from_mols(
     ]
 
 
-# ---------------------------------------------------------------------
-# Per-molecule properties
-# ---------------------------------------------------------------------
-
-
 def compute_mol_properties(mol: Chem.Mol | None) -> dict[str, float | int] | None:
-    """
-    Compute basic molecule-level RDKit properties.
-
-    Returns None if mol is None.
-    """
+ 
     if mol is None:
         return None
 
@@ -156,11 +124,6 @@ def compute_mol_properties(mol: Chem.Mol | None) -> dict[str, float | int] | Non
     return props
 
 
-# ---------------------------------------------------------------------
-# Chemical diversity
-# ---------------------------------------------------------------------
-
-
 def internal_diversity_from_mols(
     mols: list[Chem.Mol | None],
     radius: int = 2,
@@ -168,16 +131,7 @@ def internal_diversity_from_mols(
     max_samples: int = 1000,
     seed: int = 42,
 ) -> float | None:
-    """
-    Compute internal diversity from already-parsed RDKit Mol objects.
 
-    Internal diversity is the mean pairwise Tanimoto distance:
-
-        distance = 1 - Tanimoto similarity
-
-    Molecules are optionally subsampled before pairwise comparison to keep
-    the calculation tractable for large generated sets.
-    """
     valid_mols = [
         mol
         for mol in mols

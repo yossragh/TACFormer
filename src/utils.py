@@ -1,4 +1,3 @@
-#src/utils.py = paths + JSON/JSONL reading/writing + JSON-safe serialization
 from __future__ import annotations
 
 import json

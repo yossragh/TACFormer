@@ -16,13 +16,13 @@ if str(SRC_DIR) not in sys.path:
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from evaluatev3 import (
+from evaluate import (
     annotate_generated_records,
     compute_condition_nll_metrics,
     compute_generated_poi_knn_purity,
     compute_metrics,
 )
-from generatev2 import generate_to_memory
+from generate import generate_to_memory
 from metrics import extract_scalar_numeric_metrics
 from utils import append_jsonl_record
 from visualize import draw_highlighted_scaffold_grid, draw_molecule_grid
