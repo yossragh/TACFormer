@@ -1,5 +1,5 @@
 {
-  "train_jsonl": "/mimer/NOBACKUP/groups/naiss2023-6-290/yossra/dapt_merged/train_dapt.jsonl",
+  "train_jsonl": "/dapt_merged/train_dapt.jsonl",
   "vocab_size": 88,
   "min_freq": 1,
   "num_train_smiles": 75436,
